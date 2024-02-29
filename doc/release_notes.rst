@@ -7,6 +7,9 @@ Release Notes
 
 .. .. warning:: The features listed below are not released yet, but will be part of the next release! To use the features already you have to install the ``master`` branch, e.g. ``pip install git+https://github.com/pypsa/pypsa#egg=pypsa``.
 
+* It is now possible to couple the dispatch of generators. For this purpose, three new columns `p_coupling`, `p_coupling_coeff` and `p_coupling_sign` have been added to the generator component. They allow coupling the dispatch of one generator to another generator by adding a linear constraint to the optimization problem. The condition is of the form ``p {p_coupling_sign} {p_coupling_sign} * p_{p_coupling}``. The coupling is applied only when the coupling generator is active.
+
+
 PyPSA 0.27.0 (18th February 2024)
 =================================
 
@@ -127,6 +130,8 @@ PyPSA 0.26.0 (4th December 2023)
 
 * Bugfix: The function ``n.import_from_netcdf()`` failed when trying to import
   data from an ``xarray`` object.
+
+* The statistics module now supports the consideration of multi-port links. An additional argument `bus_carrier` was added to the functions to select the components that are attached to buses of a certain carrier.
 
 * Bugfix: Fix global constraints for primary energy and transmission volume
   limits for networks with multiple investment periods.
