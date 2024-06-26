@@ -126,6 +126,7 @@ Documentation
 * :doc:`optimal_power_flow`
 * :doc:`contingency_analysis`
 * :doc:`plotting`
+* :doc:`statistics`
 
 .. toctree::
    :hidden:
@@ -139,6 +140,7 @@ Documentation
    optimal_power_flow
    contingency_analysis
    plotting
+   statistics
 
 
 
