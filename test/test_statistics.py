@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 import pypsa
-from pypsa.statistics import get_bus_and_carrier, get_country_and_carrier
+from pypsa.statistics import Groupers
 
 
 def test_default_unsolved(ac_dc_network):
@@ -33,18 +33,18 @@ def test_default_solved(ac_dc_network_r):
 
 
 def test_per_bus_carrier_unsolved(ac_dc_network):
-    df = ac_dc_network.statistics(groupby=get_bus_and_carrier)
+    df = ac_dc_network.statistics(groupby=Groupers.get_bus_and_carrier)
     assert not df.empty
 
 
 def test_per_country_carrier_unsolved(ac_dc_network):
     n = ac_dc_network
-    df = n.statistics(groupby=get_country_and_carrier)
+    df = n.statistics(groupby=Groupers.get_country_and_carrier)
     assert not df.empty
 
 
 def test_per_bus_carrier_solved(ac_dc_network_r):
-    df = ac_dc_network_r.statistics(groupby=get_bus_and_carrier)
+    df = ac_dc_network_r.statistics(groupby=Groupers.get_bus_and_carrier)
     assert not df.empty
 
 
@@ -97,7 +97,7 @@ def test_bus_carrier_selection(ac_dc_network_r):
 
 def test_bus_carrier_selection_with_list(ac_dc_network_r):
     df = ac_dc_network_r.statistics(
-        groupby=get_bus_and_carrier, bus_carrier=["AC", "DC"]
+        groupby=Groupers.get_bus_and_carrier, bus_carrier=["AC", "DC"]
     )
     assert not df.empty
 
@@ -138,7 +138,7 @@ def test_multiindexed(ac_dc_network_multiindexed):
 def test_transmission_carriers(ac_dc_network_r):
     n = ac_dc_network_r
     n.lines["carrier"] = "AC"
-    df = pypsa.statistics.get_transmission_carriers(ac_dc_network_r)
+    df = pypsa.statistics._get_transmission_carriers(ac_dc_network_r)
     assert "AC" in df.unique(1)
 
 

@@ -14,28 +14,6 @@ from pypsa.descriptors import nominal_attrs
 logger = logging.getLogger(__name__)
 
 
-def get_carrier(n, c, nice_names=True):
-    """
-    Get the nice carrier names for a component.
-    """
-    df = n.df(c)
-    fall_back = pd.Series("", index=df.index)
-    carrier_series = df.get("carrier", fall_back).rename("carrier")
-    if nice_names:
-        carrier_series = carrier_series.replace(
-            n.carriers.nice_name[lambda ds: ds != ""]
-        ).replace("", "-")
-    return carrier_series
-
-
-def get_bus_and_carrier(n, c, port="", nice_names=True):
-    """
-    Get the buses and nice carrier names for a component.
-    """
-    bus = f"bus{port}"
-    return [n.df(c)[bus].rename("bus"), get_carrier(n, c, nice_names=nice_names)]
-
-
 def get_bus_unit_and_carrier(n, c, port="", nice_names=True):
     """
     Get the buses and nice carrier names for a component.
@@ -44,48 +22,8 @@ def get_bus_unit_and_carrier(n, c, port="", nice_names=True):
     return [
         n.df(c)[bus].rename("bus"),
         n.df(c)[bus].map(n.buses.unit).rename("unit"),
-        get_carrier(n, c, nice_names=nice_names),
+        Groupers.get_carrier(n, c, nice_names=nice_names),
     ]
-
-
-def get_name_bus_and_carrier(n, c, port="", nice_names=True):
-    """
-    Get the name, buses and nice carrier names for a component.
-    """
-    return [
-        n.df(c).index.to_series().rename("name"),
-        *get_bus_and_carrier(n, c, port, nice_names=nice_names),
-    ]
-
-
-def get_country_and_carrier(n, c, port="", nice_names=True):
-    """
-    Get component country and carrier.
-    """
-    bus = f"bus{port}"
-    bus, carrier = get_bus_and_carrier(n, c, port, nice_names=nice_names)
-    country = bus.map(n.buses.country).rename("country")
-    return [country, carrier]
-
-
-def get_bus_and_carrier_and_bus_carrier(n, c, port="", nice_names=True):
-    """
-    Get component's carrier, bus and bus carrier in one combined list.
-
-    Used for MultiIndex in energy balance.
-    """
-    bus_and_carrier = get_bus_and_carrier(n, c, port, nice_names=nice_names)
-    bus_carrier = bus_and_carrier[0].map(n.buses.carrier).rename("bus_carrier")
-    return [*bus_and_carrier, bus_carrier]
-
-
-def get_carrier_and_bus_carrier(n, c, port="", nice_names=True):
-    """
-    Get component carrier and bus carrier in one combined list.
-    """
-    bus, carrier = get_bus_and_carrier(n, c, port, nice_names=nice_names)
-    bus_carrier = bus.map(n.buses.carrier).rename("bus_carrier")
-    return [carrier, bus_carrier]
 
 
 def get_operation(n, c):
@@ -112,16 +50,7 @@ def get_weightings(n, c):
         return n.snapshot_weightings["objective"]
 
 
-# TODO: remove in 0.29
-@deprecated(deprecated_in="0.28", removed_in="0.29")
-def get_ports(n, c):
-    """
-    Get a list of existent ports of a component.
-    """
-    return [col[3:] for col in n.df(c) if col.startswith("bus")]
-
-
-def port_efficiency(n, c, port=""):
+def _port_efficiency(n, c, port=""):
     if (port == "") or "efficiency" not in n.df(c):
         efficiency = 1
     elif port == "0":
@@ -133,7 +62,7 @@ def port_efficiency(n, c, port=""):
     return efficiency
 
 
-def get_transmission_branches(n, bus_carrier=None):
+def _get_transmission_branches(n, bus_carrier=None):
     """
     Get the list of assets which transport between buses of the carrier
     `bus_carrier`.
@@ -156,12 +85,12 @@ def get_transmission_branches(n, bus_carrier=None):
     )
 
 
-def get_transmission_carriers(n, bus_carrier=None):
+def _get_transmission_carriers(n, bus_carrier=None):
     """
     Get the carriers which transport between buses of the carrier
     `bus_carrier`.
     """
-    branches = get_transmission_branches(n, bus_carrier)
+    branches = _get_transmission_branches(n, bus_carrier)
     carriers = {}
     for c in branches.unique(0):
         idx = branches[branches.get_loc(c)].get_level_values(1)
@@ -172,7 +101,7 @@ def get_transmission_carriers(n, bus_carrier=None):
     )
 
 
-def get_grouping(n, c, groupby, port=None, nice_names=False) -> [pd.Series, list]:
+def _get_grouping(n, c, groupby, port=None, nice_names=False) -> [pd.Series, list]:
     by = None
     level = None
     if callable(groupby):
@@ -191,7 +120,7 @@ def get_grouping(n, c, groupby, port=None, nice_names=False) -> [pd.Series, list
     return dict(by=by, level=level)
 
 
-def aggregate_timeseries(df, weights, agg="sum"):
+def _aggregate_timeseries(df, weights, agg="sum"):
     """
     Calculate the weighted sum or average of a DataFrame or Series.
     """
@@ -213,7 +142,7 @@ def aggregate_timeseries(df, weights, agg="sum"):
     return df.agg(agg)
 
 
-def filter_active_assets(n, c, df: [pd.Series, pd.DataFrame]):
+def _filter_active_assets(n, c, df: [pd.Series, pd.DataFrame]):
     """
     For static values iterate over periods and concat values.
     """
@@ -225,7 +154,7 @@ def filter_active_assets(n, c, df: [pd.Series, pd.DataFrame]):
     return pd.concat(per_period, axis=1)
 
 
-def filter_bus_carrier(n, c, port, bus_carrier, df):
+def _filter_bus_carrier(n, c, port, bus_carrier, df):
     """
     Filter the DataFrame for components which are connected to a bus with
     carrier `bus_carrier`.
@@ -248,7 +177,7 @@ def filter_bus_carrier(n, c, port, bus_carrier, df):
         )
 
 
-def aggregate_components(
+def _aggregate_components(
     n,
     func,
     agg="sum",
@@ -268,7 +197,7 @@ def aggregate_components(
     if comps is None:
         comps = n.branch_components | n.one_port_components
     if groupby is None:
-        groupby = get_carrier
+        groupby = Groupers.get_carrier
     for c in comps:
         if n.df(c).empty:
             continue
@@ -280,12 +209,14 @@ def aggregate_components(
         df = []
         for port in ports:
             vals = func(n, c, port)
-            vals = filter_active_assets(n, c, vals)  # for multiinvest
-            vals = filter_bus_carrier(n, c, port, bus_carrier, vals)
+            vals = _filter_active_assets(n, c, vals)  # for multiinvest
+            vals = _filter_bus_carrier(n, c, port, bus_carrier, vals)
 
             # unit tracker
             if groupby is not False:
-                grouping = get_grouping(n, c, groupby, port=port, nice_names=nice_names)
+                grouping = _get_grouping(
+                    n, c, groupby, port=port, nice_names=nice_names
+                )
                 vals = vals.groupby(**grouping).agg(agg)
             df.append(vals)
 
@@ -302,7 +233,7 @@ def aggregate_components(
     return pd.concat(d, names=index_names)[lambda ds: ds != 0]
 
 
-def pass_empty_series_if_keyerror(func):
+def _pass_empty_series_if_keyerror(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
@@ -318,15 +249,87 @@ class Groupers:
     Container for all the get_ methods.
     """
 
-    get_carrier = staticmethod(get_carrier)
-    get_bus_and_carrier = staticmethod(get_bus_and_carrier)
-    get_name_bus_and_carrier = staticmethod(get_name_bus_and_carrier)
-    get_country_and_carrier = staticmethod(get_country_and_carrier)
-    get_carrier_and_bus_carrier = staticmethod(get_carrier_and_bus_carrier)
-    get_bus_and_carrier_and_bus_carrier = staticmethod(
-        get_bus_and_carrier_and_bus_carrier
-    )
-    get_bus_unit_and_carrier = staticmethod(get_bus_unit_and_carrier)
+    @staticmethod
+    def get_carrier(n, c, nice_names=True):
+        """
+        Get the nice carrier names for a component.
+        """
+        df = n.df(c)
+        fall_back = pd.Series("", index=df.index)
+        carrier_series = df.get("carrier", fall_back).rename("carrier")
+        if nice_names:
+            carrier_series = carrier_series.replace(
+                n.carriers.nice_name[lambda ds: ds != ""]
+            ).replace("", "-")
+        return carrier_series
+
+    @staticmethod
+    def get_bus_and_carrier(n, c, port="", nice_names=True):
+        """
+        Get the buses and nice carrier names for a component.
+        """
+        bus = f"bus{port}"
+        return [
+            n.df(c)[bus].rename("bus"),
+            Groupers.get_carrier(n, c, nice_names=nice_names),
+        ]
+
+    def get_name_bus_and_carrier(n, c, port="", nice_names=True):
+        """
+        Get the name, buses and nice carrier names for a component.
+        """
+        return [
+            n.df(c).index.to_series().rename("name"),
+            *Groupers.get_bus_and_carrier(n, c, port, nice_names=nice_names),
+        ]
+
+    def get_country_and_carrier(n, c, port="", nice_names=True):
+        """
+        Get component country and carrier.
+        """
+        bus = f"bus{port}"
+        bus, carrier = Groupers.get_bus_and_carrier(n, c, port, nice_names=nice_names)
+        country = bus.map(n.buses.country).rename("country")
+        return [country, carrier]
+
+    def get_carrier_and_bus_carrier(n, c, port="", nice_names=True):
+        """
+        Get component carrier and bus carrier in one combined list.
+        """
+        bus, carrier = Groupers.get_bus_and_carrier(n, c, port, nice_names=nice_names)
+        bus_carrier = bus.map(n.buses.carrier).rename("bus_carrier")
+        return [carrier, bus_carrier]
+
+    def get_bus_and_carrier_and_bus_carrier(n, c, port="", nice_names=True):
+        """
+        Get component's carrier, bus and bus carrier in one combined list.
+
+        Used for MultiIndex in energy balance.
+        """
+        bus_and_carrier = Groupers.get_bus_and_carrier(
+            n, c, port, nice_names=nice_names
+        )
+        bus_carrier = bus_and_carrier[0].map(n.buses.carrier).rename("bus_carrier")
+        return [*bus_and_carrier, bus_carrier]
+
+    def get_bus_unit_and_carrier(n, c, port="", nice_names=True):
+        """
+        Get the buses and nice carrier names for a component.
+        """
+        bus = f"bus{port}"
+        return [
+            n.df(c)[bus].rename("bus"),
+            n.df(c)[bus].map(n.buses.unit).rename("unit"),
+            Groupers.get_carrier(n, c, nice_names=nice_names),
+        ]
+
+    # TODO: remove in 0.29
+    @deprecated(deprecated_in="0.28", removed_in="0.29")
+    def get_ports(n, c):
+        """
+        Get a list of existent ports of a component.
+        """
+        return [col[3:] for col in n.df(c) if col.startswith("bus")]
 
 
 class StatisticsAccessor:
@@ -336,13 +339,13 @@ class StatisticsAccessor:
 
     def __init__(self, network):
         self._parent = network
-        self.groupers = Groupers()  # Create an instance of the Groupers class
+        self.groupers = Groupers  # Create an instance of the Groupers class
 
     def __call__(
         self,
         comps=None,
         aggregate_groups="sum",
-        groupby=get_carrier,
+        groupby=Groupers.get_carrier,
         nice_names=True,
         **kwargs,
     ):
@@ -431,12 +434,12 @@ class StatisticsAccessor:
         """
         n = self._parent
 
-        @pass_empty_series_if_keyerror
+        @_pass_empty_series_if_keyerror
         def func(n, c, port):
             col = n.df(c).eval(f"{nominal_attrs[c]}_opt * capital_cost")
             return col
 
-        df = aggregate_components(
+        df = _aggregate_components(
             n,
             func,
             comps=comps,
@@ -468,12 +471,12 @@ class StatisticsAccessor:
         """
         n = self._parent
 
-        @pass_empty_series_if_keyerror
+        @_pass_empty_series_if_keyerror
         def func(n, c, port):
             col = n.df(c).eval(f"{nominal_attrs[c]} * capital_cost")
             return col
 
-        df = aggregate_components(
+        df = _aggregate_components(
             n,
             func,
             comps=comps,
@@ -552,15 +555,15 @@ class StatisticsAccessor:
         if storage:
             comps = ("Store", "StorageUnit")
 
-        @pass_empty_series_if_keyerror
+        @_pass_empty_series_if_keyerror
         def func(n, c, port):
-            efficiency = abs(port_efficiency(n, c, port=port))
+            efficiency = abs(_port_efficiency(n, c, port=port))
             col = n.df(c)[f"{nominal_attrs[c]}_opt"] * efficiency
             if storage and (c == "StorageUnit"):
                 col = col * n.df(c).max_hours
             return col
 
-        df = aggregate_components(
+        df = _aggregate_components(
             n,
             func,
             comps=comps,
@@ -601,15 +604,15 @@ class StatisticsAccessor:
         if storage:
             comps = ("Store", "StorageUnit")
 
-        @pass_empty_series_if_keyerror
+        @_pass_empty_series_if_keyerror
         def func(n, c, port):
-            efficiency = abs(port_efficiency(n, c, port=port))
+            efficiency = abs(_port_efficiency(n, c, port=port))
             col = n.df(c)[f"{nominal_attrs[c]}"] * efficiency
             if storage and (c == "StorageUnit"):
                 col = col * n.df(c).max_hours
             return col
 
-        df = aggregate_components(
+        df = _aggregate_components(
             n,
             func,
             comps=comps,
@@ -691,7 +694,7 @@ class StatisticsAccessor:
         """
         n = self._parent
 
-        @pass_empty_series_if_keyerror
+        @_pass_empty_series_if_keyerror
         def func(n, c, port):
             if c in n.branch_components:
                 p = n.pnl(c).p0
@@ -702,9 +705,9 @@ class StatisticsAccessor:
 
             opex = p * n.get_switchable_as_dense(c, "marginal_cost")
             weights = get_weightings(n, c)
-            return aggregate_timeseries(opex, weights, agg=aggregate_time)
+            return _aggregate_timeseries(opex, weights, agg=aggregate_time)
 
-        df = aggregate_components(
+        df = _aggregate_components(
             n,
             func,
             comps=comps,
@@ -863,15 +866,15 @@ class StatisticsAccessor:
         if comps is None:
             comps = n.branch_components
 
-        transmission_branches = get_transmission_branches(n, bus_carrier)
+        transmission_branches = _get_transmission_branches(n, bus_carrier)
 
-        @pass_empty_series_if_keyerror
+        @_pass_empty_series_if_keyerror
         def func(n, c, port):
             p = n.pnl(c)[f"p{port}"][transmission_branches.get_loc_level(c)[1]]
             weights = get_weightings(n, c)
-            return aggregate_timeseries(p, weights, agg=aggregate_time)
+            return _aggregate_timeseries(p, weights, agg=aggregate_time)
 
-        df = aggregate_components(
+        df = _aggregate_components(
             n,
             func,
             comps=comps,
@@ -891,7 +894,7 @@ class StatisticsAccessor:
         aggregate_time="sum",
         aggregate_groups="sum",
         aggregate_bus=True,
-        groupby=get_carrier_and_bus_carrier,
+        groupby=Groupers.get_carrier_and_bus_carrier,
         at_port=True,
         bus_carrier=None,
         nice_names=True,
@@ -927,16 +930,16 @@ class StatisticsAccessor:
 
         # TODO remove aggregate_bus in 0.29
         if not aggregate_bus:
-            if groupby != get_carrier_and_bus_carrier:
+            if groupby != Groupers.get_carrier_and_bus_carrier:
                 logger.warning(
                     "Argument 'groupby' is ignored when 'aggregate_bus' is set to True. Falling back to default."
                 )
             logger.warning(
                 "Argument 'aggregate_bus' is deprecated in 0.28 and will be removed in 0.29. Use grouper `get_bus_and_carrier_and_bus_carrier` instead."
             )
-            groupby = get_bus_and_carrier_and_bus_carrier
+            groupby = Groupers.get_bus_and_carrier_and_bus_carrier
 
-        @pass_empty_series_if_keyerror
+        @_pass_empty_series_if_keyerror
         def func(n, c, port):
             sign = -1.0 if c in n.branch_components else n.df(c).get("sign", 1.0)
             weights = get_weightings(n, c)
@@ -949,9 +952,9 @@ class StatisticsAccessor:
                 logger.warning(
                     "Argument 'kind' is not recognized. Falling back to energy balance."
                 )
-            return aggregate_timeseries(p, weights, agg=aggregate_time)
+            return _aggregate_timeseries(p, weights, agg=aggregate_time)
 
-        df = aggregate_components(
+        df = _aggregate_components(
             n,
             func,
             comps=comps,
@@ -997,13 +1000,13 @@ class StatisticsAccessor:
         """
         n = self._parent
 
-        @pass_empty_series_if_keyerror
+        @_pass_empty_series_if_keyerror
         def func(n, c, port):
             p = (n.pnl(c).p_max_pu * n.df(c).p_nom_opt - n.pnl(c).p).clip(lower=0)
             weights = get_weightings(n, c)
-            return aggregate_timeseries(p, weights, agg=aggregate_time)
+            return _aggregate_timeseries(p, weights, agg=aggregate_time)
 
-        df = aggregate_components(
+        df = _aggregate_components(
             n,
             func,
             comps=comps,
@@ -1045,11 +1048,11 @@ class StatisticsAccessor:
         """
         n = self._parent
 
-        @pass_empty_series_if_keyerror
+        @_pass_empty_series_if_keyerror
         def func(n, c, port):
             p = get_operation(n, c).abs()
             weights = get_weightings(n, c)
-            return aggregate_timeseries(p, weights, agg=aggregate_time)
+            return _aggregate_timeseries(p, weights, agg=aggregate_time)
 
         kwargs = dict(
             comps=comps,
@@ -1058,7 +1061,7 @@ class StatisticsAccessor:
             bus_carrier=bus_carrier,
             nice_names=nice_names,
         )
-        df = aggregate_components(n, func, agg=aggregate_groups, **kwargs)
+        df = _aggregate_components(n, func, agg=aggregate_groups, **kwargs)
         capacity = self.optimal_capacity(aggregate_groups=aggregate_groups, **kwargs)
         df = df.div(capacity.reindex(df.index), axis=0)
         df.attrs["name"] = "Capacity Factor"
@@ -1101,7 +1104,7 @@ class StatisticsAccessor:
         """
         n = self._parent
 
-        @pass_empty_series_if_keyerror
+        @_pass_empty_series_if_keyerror
         def func(n, c, port):
             sign = -1.0 if c in n.branch_components else n.df(c).get("sign", 1.0)
             df = sign * n.pnl(c)[f"p{port}"]
@@ -1120,9 +1123,9 @@ class StatisticsAccessor:
                     )
             revenue = df * prices
             weights = get_weightings(n, c)
-            return aggregate_timeseries(revenue, weights, agg=aggregate_time)
+            return _aggregate_timeseries(revenue, weights, agg=aggregate_time)
 
-        df = aggregate_components(
+        df = _aggregate_components(
             n,
             func,
             comps=comps,
