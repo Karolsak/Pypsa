@@ -52,6 +52,13 @@ v0.30.0 (30th August 2024)
 * See full list of changes `here
   <https://github.com/PyPSA/PyPSA/releases/tag/v0.30.0>`__.
 
+* PyPSA now supports committability and extendability, on 
+  the same components, if modularity is used. The new feature
+  is compatible with start-up and shut-down costs, ramp-up and
+  shut-down limit. The feature is not still compatible with
+  min-up and min-down time, up and down time before.
+
+
 v0.29.0 (31st July 2024)
 =============================
 
