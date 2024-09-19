@@ -1648,3 +1648,166 @@ class SubNetwork(Common):
             c = Component(c.name, c.list_name, c.attrs, c.df.loc[ind], pnl, ind)
             if not (skip_empty and len(ind) == 0):
                 yield c
+
+
+class StochasticNetwork(Network):
+    def __init__(self, n, scenarios):
+        """
+        Initialize a StochasticNetwork.
+
+        Parameters
+        ----------
+        n : Network
+            The original PyPSA Network object.
+        scenarios : dict
+            A dictionary with scenario names as keys and their probabilities as values.
+        """
+        super().__init__()
+
+        self.scenarios = scenarios
+
+        for attr, value in n.__dict__.items():
+            setattr(self, attr, value)
+
+        self._reindex_snapshots()
+        self._reindex_time_dependent_data()
+        self._create_scenario_dependent_static_components()
+
+    def _reindex_snapshots(self):
+        """Reindex snapshots to include scenarios."""
+        scenario_index = pd.Index(self.scenarios.keys(), name="scenario")
+        self._snapshots = pd.MultiIndex.from_product(
+            [scenario_index, self.snapshots], names=["scenario", "snapshot"]
+        )
+
+        # Update snapshot weightings considering scenario probabilities
+        self._snapshot_weightings = pd.concat(
+            {s: self._snapshot_weightings * p for s, p in self.scenarios.items()},
+            names=["scenario", "snapshot"],
+        )
+
+    def _reindex_time_dependent_data(self):
+        """Reindex all time-dependent data to include scenarios."""
+        for component in self.all_components:
+            pnl_name = f"{component.lower()}s_t"  # to generalise in pypsa.descriptors?
+            if hasattr(self, pnl_name):
+                pnl = getattr(
+                    self, pnl_name
+                )  # we broadcast here all time-dependent data
+                for key, df in pnl.items():
+                    pnl[key] = pd.concat(
+                        {s: df for s in self.scenarios}, names=["scenario", "snapshot"]
+                    )
+
+    def _create_scenario_dependent_static_components(self):
+        """Create scenario-dependent static components and populate with original data."""
+        static_components = [
+            "generators",
+            "loads",
+            "lines",
+            "links",
+            "transformers",
+            "storage_units",
+            "stores",
+        ]
+
+        for component in static_components:
+            original_df = getattr(self, component)
+            scenario_dict = Dict()
+
+            for scenario in self.scenarios:
+                scenario_dict[scenario] = original_df.copy()
+
+            setattr(self, f"{component}", scenario_dict)
+
+    @property
+    def scenarios(self):
+        """Get the scenarios dictionary."""
+        return self._scenarios
+
+    @scenarios.setter
+    def scenarios(self, value):
+        """Set the scenarios dictionary and validate probabilities."""
+        if not isinstance(value, dict):
+            raise TypeError("Scenarios must be a dictionary.")
+        if not all(isinstance(v, (int, float)) for v in value.values()):
+            raise ValueError("Scenario probabilities must be numbers.")
+        if abs(sum(value.values()) - 1) > 1e-10:
+            raise ValueError("Scenario probabilities must sum to 1.")
+        self._scenarios = value
+
+    def set_snapshots(self, snapshots):
+        """Override set_snapshots to maintain stochastic structure."""
+        super().set_snapshots(snapshots)
+        self._reindex_snapshots()
+        self._reindex_time_dependent_data()
+
+    def df(self, component_name: str) -> Dict[str, pd.DataFrame] | pd.DataFrame:
+        """
+        Return the dictionary of DataFrames or a single DataFrame of static components for component_name.
+
+        Parameters
+        ----------
+        component_name : string
+
+        Returns
+        -------
+        Dict[str, pandas.DataFrame] or pandas.DataFrame
+        """
+        try:
+            return getattr(self, self.components[component_name]["list_name"])
+        except AttributeError:
+            # If the attribute doesn't exist, return an empty DataFrame
+            return pd.DataFrame()
+
+    # Here we handle the StochasticNetwork case (dict of DataFrames) and add printout of scenarios
+    def __repr__(self) -> str:
+        header = "PyPSA StochasticNetwork \U0001f500" + (
+            f" '{self.name}'" if self.name else ""
+        )
+        comps = {}
+        for c in self.iterate_components():
+            if "Type" not in c.name:
+                df_or_dict = self.df(c.name)
+                if isinstance(df_or_dict, dict):
+                    count = sum(len(df) for df in df_or_dict.values())
+                else:
+                    count = len(df_or_dict)
+                if count > 0:
+                    comps[c.name] = f" - {c.name}: {count}"
+
+        content = "\nComponents:"
+        if comps:
+            content += "\n" + "\n".join(comps[c] for c in sorted(comps))
+        else:
+            header = "Empty " + header
+            content += " none"
+        content += "\n"
+        content += f"Snapshots: {len(self.snapshots)}"
+        content += f"\nScenarios: [{', '.join(self.scenarios.keys())}]"
+
+        return header + content
+
+    # Again handle the StochasticNetwork case (dict of DataFrames)
+    def iterate_components(
+        self, components: Collection[str] | None = None, skip_empty: bool = True
+    ) -> Iterator[Component]:
+        if components is None:
+            components = self.all_components
+
+        for c in components:
+            df_or_dict = self.df(c)
+            if skip_empty:
+                if isinstance(df_or_dict, dict):
+                    if not df_or_dict or all(df.empty for df in df_or_dict.values()):
+                        continue
+                elif df_or_dict.empty:
+                    continue
+            yield Component(
+                name=c,
+                list_name=self.components[c]["list_name"],
+                attrs=self.components[c]["attrs"],
+                df=df_or_dict,
+                pnl=self.pnl(c),
+                ind=None,
+            )
